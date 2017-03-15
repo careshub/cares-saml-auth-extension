@@ -12,26 +12,105 @@
 /**
  * Describes characteristics of the trusted Identity Providers.
  * This works in concert with the server setup for simpleSAMLphp.
+ * The format of the array is "email_domain" => "sso_identity_provider_to_use".
  *
- * @TODO: This could be set per-site via options in a network setup.
- *
- * @param mixed $value
- * @param string $option_name
+ * @return array
  */
 function cares_saml_get_idp_associations() {
 	return array(
-		'heart.org' => 'heart.org',
+		'heart.org'    => 'heart.org',
 		'testshib.org' => 'testshib.org',
 		// Associative array is important because several domains could point to same idp, like
-		// 'missouri.edu' => 'missouri.edu',
-		// 'umsystem.edu' => 'missouri.edu',
+		'umsystem.edu' => 'umsystem.edu',
+		'missouri.edu' => 'umsystem.edu',
+		'mst.edu'      => 'umsystem.edu',
+		'umkc.edu'     => 'umsystem.edu',
+		'umh.edu'      => 'umsystem.edu',
+		'mizzou.edu'   => 'umsystem.edu',
+		'umsl.edu'     => 'umsystem.edu',
 	);
+}
+
+/**
+ * Fetch an array of known possible remote identity providers.
+ * The strings used are the IDs of the authsources set up in simpleSAMLphp.
+ *
+ * @since 1.0.0
+ *
+ * @return array
+ */
+function cares_saml_get_available_idps() {
+	return array_unique( array_values( cares_saml_get_idp_associations() ) );
+}
+
+/**
+ * Fetch an array of known possible remote identity providers.
+ * The strings used are the IDs of the authsources set up in simpleSAMLphp.
+ *
+ * @since 1.0.0
+ *
+ * @return string URL that will redirect to auth provider.
+ */
+function cares_saml_get_login_url_for_idp( $idp = null, $return_to = null ) {
+	$ipd_args = array( 'AuthId' => $idp );
+	// We want to send the user back to the current page if it's known.
+	if ( $return_to ) {
+		$ipd_args['ReturnTo'] = $return_to;
+	} elseif ( is_null( $return_to ) && $_SERVER['HTTP_REFERER'] ) {
+		$ipd_args['ReturnTo'] = $_SERVER['HTTP_REFERER'];
+	}
+
+	return add_query_arg( $ipd_args, site_url( '/simplesaml/module.php/core/as_login.php' ) );
+}
+
+
+/**
+ * Fetch an array of email address domains that could refer to configured remote
+ * identity providers.
+ *
+ * @since 1.0.0
+ *
+ * @return array
+ */
+function cares_saml_get_available_email_domains() {
+	return array_keys( cares_saml_get_idp_associations() );
+}
+
+/**
+ * Fetch an array of email addresses that are configured to authenticate
+ * with remote identity providers on this site.
+ *
+ * @since 1.0.0
+ *
+ * @return array
+ */
+function cares_saml_get_sso_domains_for_site() {
+	$domains = get_option( 'sso_required_domains' );
+	return cares_saml_sanitize_sso_required_domains( $domains );
+}
+
+/**
+ * Fetch an array of known possible remote identity providers.
+ * The strings used are the IDs of the authsources set up in simpleSAMLphp.
+ *
+ * @since 1.0.0
+ *
+ * @param array $domains Array of email domains to sanitize
+ *
+ * @return array Domains that are configured in cares_saml_get_idp_associations().
+ */
+function cares_saml_sanitize_sso_required_domains( $domains ) {
+	// Make sure domains are allowed domains.
+	$all_domains = cares_saml_get_available_email_domains();
+	return array_values( array_intersect( $all_domains, (array) $domains ) );
 }
 
 /**
  * Check an email address for membership in a remote IdP.
  * This works in concert with the server setup for simpleSAMLphp.
  *
+ *
+ * @since 1.0.0
  * @param string $email_address
  *
  * @return null|string The Identity Provider key if matched. Null otherwise.
@@ -39,13 +118,56 @@ function cares_saml_get_idp_associations() {
 function cares_saml_get_idp_by_email_address( $email_address ) {
 	$idp = null;
 	$domain = substr( strrchr( $email_address, '@' ), 1 );
-	$associations = cares_saml_get_idp_associations();
 
-	if ( isset( $associations[ $domain ] ) || array_key_exists( $domain, $associations ) ) {
-		$idp = $associations[ $domain ];
+	// Has this domain been set to require usage of a remote identity provider for this site?
+	$sso_domains = cares_saml_get_sso_domains_for_site();
+	if ( in_array( $domain, $sso_domains ) ) {
+		// If yes, we must find the correct IdP to use.
+		$associations = cares_saml_get_idp_associations();
+
+		if ( isset( $associations[ $domain ] ) || array_key_exists( $domain, $associations ) ) {
+			$idp = $associations[ $domain ];
+		}
 	}
 
 	return $idp;
+}
+
+/**
+ * Find the user's email address from the mixed input of the login form.
+ *
+ * @since 1.0.0
+ *
+ * @param string $username The login name or email address provided by the user.
+ * @param string $limit    Passing 'current' checks email addresses against current users.
+ *                         Passing 'any' just checks the passed email address.
+ *
+ * @return string|boolean False if none found, email address otherwise.
+ */
+function cares_saml_get_email_from_login_form_input( $username = '', $limit = 'current' ) {
+	$email_address = false;
+	$maybe_user    = false;
+	$username      = trim( wp_unslash( $username ) );
+
+	// If we don't know the email address, try to find it.
+	if ( strpos( $username, '@' ) === false ) {
+		// If the passed username is not an email address, we need to find the email address.
+		$maybe_user = get_user_by( 'login', $username );
+	} else {
+		// The user passed an email address.
+		if ( $limit === 'any' ) {
+			// "Any" means use it without verifying that it belongs to a current user.
+			$email_address = $username;
+		} else {
+			$maybe_user = get_user_by( 'email', $username );
+		}
+	}
+
+	if ( $maybe_user instanceof WP_User  ) {
+		$email_address = $maybe_user->user_email;
+	}
+
+	return $email_address;
 }
 
 /**
@@ -53,6 +175,8 @@ function cares_saml_get_idp_by_email_address( $email_address ) {
  *
  * @param mixed $value
  * @param string $option_name
+ *
+ * @since 1.0.0
  */
 function cares_wpsa_filter_option( $value, $option_name ) {
 	$defaults = array(
@@ -89,7 +213,7 @@ function cares_wpsa_filter_option( $value, $option_name ) {
 		 *
 		 * @param bool
 		 */
-		'auto_provision'         => true,
+		'auto_provision'         => false, // was true
 		/**
 		 * Whether or not to permit logging in with username and password.
 		 *
