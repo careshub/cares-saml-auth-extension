@@ -48,19 +48,6 @@ class CARES_SAML_Public {
 	protected $plugin_slug = 'cares-saml-auth';
 
 	/**
-	 *
-	 * Identity Provider.
-	 *
-	 *
-	 * If we've calculated the identity provider, it'll be stored here.
-	 *
-	 * @since    1.0.0
-	 *
-	 * @var      false|string
-	 */
-	protected $identity_provider = false;
-
-	/**
 	 * Initialize the plugin by setting localization and loading public scripts
 	 * and styles.
 	 *
@@ -80,8 +67,24 @@ class CARES_SAML_Public {
 		// Before logging in, check if the user is required to log in against a remote identity provider.
 		add_filter( 'authenticate', array( $this, 'maybe_force_remote_idp_login' ),  21, 3 );
 
-		add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
+		// Log the user out of the remote auth provider when they log out of WordPress.
+		// add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
 
+		// Change the behavior of wp-login.php
+		// Add a hidden input so we know when requests come from the "Single Sign on" form.
+		add_action( 'login_form', array( $this, 'login_form_add_action_input' ) );
+		// Add an SSO link to the bottom of the login forms.
+		add_action( 'cares_after_login_form', array( $this, 'login_forms_add_sso_link' ) );
+
+		// Intercept password reset requests for users that authenticate against external identity providers
+		add_action( 'lostpassword_post', array( $this, 'check_lost_password_request' ) );
+
+		// Registration improvements
+		add_filter( 'cc_registration_extras_email_validate_message', array( $this, 'registration_check_sso_domain' ) );
+		// Make a random password for remote IdP-authenticated users
+		add_filter( 'bp_signup_pre_validate', array( $this, 'randomize_password_for_sso_users' ), 20 );
+		// For new users that authenticate against an SSO, require authentication before the account is created.
+		add_action( 'bp_signup_validate', array( $this, 'maybe_require_validation_against_idp' ), 8 );
 
 	}
 
@@ -143,71 +146,33 @@ class CARES_SAML_Public {
 
 	}
 
+
 	/**
-	 * Before logging in, check that the user isn't required to login against a remote identity provider.
+	 * Register and enqueue public-facing style sheet.
 	 *
 	 * @since    1.0.0
-
-	 * @param null|WP_User|WP_Error $user     WP_User if the user is authenticated.
-	 *                                        WP_Error or null otherwise.
-	 * @param string                $username Username or email address.
-	 * @param string                $password User password
 	 */
-	public function maybe_force_remote_idp_login( $user, $username, $password ) {
-		/*
-		 * If the email address's domain is served by a remote Identity Provider,
-		 * we must not allow the user to log in with his local WP credentials.
-		 * Instead, send the user to simpleSAMLphp for remote auth.
-		 */
-
-		if ( $user instanceof WP_User ) {
-			// If the WP_User object's already been set, we know the email address.
-			$email_address = $user->user_email;
-		} elseif ( empty( $username ) ) {
-			// If we don't have a $user object or username to work with, bail out.
-			return $user;
-		}
-
-		// If we don't know the email address, try to find it.
-		if ( ! $email_address ) {
-			if ( strpos( $username, '@' ) === false ) {
-				// If the passed username is not an email address, we need to find the email address.
-				$maybe_user = get_user_by( 'login', $username );
-				if ( isset( $maybe_user->user_email ) ) {
-					$email_address = $maybe_user->user_email;
-				}
-			} else {
-				// The user passed an email address.
-				$email_address = $username;
-			}
-		}
-
-		/*
-		 * If we've got an email address and it belongs to one of our remote
-		 * authorization sources, refer the authorization to that identity provider.
-		 */
-		if ( $email_address && $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
-			$user = $this->do_saml_authentication( $idp );
-		}
-
-		return $user;
 	}
 
+	// Working with simpleSAMLphp **********************************************
+
 	/**
-	 * Do the SAML authentication dance
+	 * Use simpleSAMLphp to attempt a remote login.
 	 *
 	 * @since 1.0.0
 	 *
- 	 * @param null|WP_User|WP_Error $user     WP_User if the user is authenticated.
+	 * @param null|WP_User|WP_Error $user     WP_User if the user is authenticated.
 	 *                                        WP_Error or null otherwise.
 	 * @param string                $username Username or email address.
 	 */
-	private function do_saml_authentication( $idp ) {
-		if ( empty( $idp ) ) {
-			$idp = self::get_option( 'auth_source' );
-		}
+	private function do_saml_authentication( $idp = null ) {
 
-		$idp_provider = $this->get_simplesaml_instance( $idp );
+		$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
+
+		// Don't continue if simpleSAMLphp isn't set up.
+		if ( ! $idp_provider ) {
+			return null;
+		}
 
 		$idp_provider->requireAuth();
 		$attributes = $idp_provider->getAttributes();
@@ -224,8 +189,6 @@ class CARES_SAML_Public {
 		 */
 		$existing_user = get_user_by( $get_user_by, $attributes[ $attribute ][0] );
 		if ( $existing_user ) {
-			// Set the auth source as a cookie to use on logout.
-			$this->set_auth_source_cookie( $idp );
 			return $existing_user;
 		}
 
@@ -233,7 +196,27 @@ class CARES_SAML_Public {
 		 * If the user doesn't already exist, try to create a new user.
 		 */
 		if ( ! self::get_option( 'auto_provision' ) ) {
-			return new WP_Error( 'wp_saml_auth_auto_provision_disabled', esc_html__( 'No WordPress user exists for your account. Please contact your administrator.', 'wp-saml-auth' ) );
+			// Add some useful attributes for new accounts.
+			$query_args = array(
+				'sso_email' => $attributes[ $attribute ][0],
+				'sso_username' => $attributes[ 'uid' ][0],
+			);
+
+			$display_name = '';
+			if ( ! empty( $attributes['display_name'][0] ) ) {
+				$display_name = $attributes['display_name'][0];
+			} elseif ( ! empty( $attributes['first_name'][0] ) && ! empty( $attributes['last_name'][0] ) ) {
+				$display_name = $attributes['first_name'][0] . ' ' . $attributes['last_name'][0];
+			}
+			if ( $display_name ) {
+				$query_args['sso_displayname'] = $display_name;
+			}
+
+			$registration_url = esc_url( add_query_arg(
+				$query_args,
+				wp_registration_url() ) );
+
+			return new WP_Error( 'wp_saml_auth_auto_provision_disabled', sprintf( __( 'No Community Commons account exists with your email address. Please <a href="%s">register</a> for a new account.', 'wp-saml-auth' ), $registration_url ) );
 		}
 
 		$user_args = array();
@@ -243,11 +226,6 @@ class CARES_SAML_Public {
 		}
 		$user_args['role'] = self::get_option( 'default_role' );
 		$user_args['user_pass'] = wp_generate_password();
-
-		$towrite = PHP_EOL . 'creating user, user_args: ' . print_r( $user_args, TRUE );
-		$fp = fopen('/var/simplesamlphp/tshoot.txt', 'a');
-		fwrite($fp, $towrite);
-		fclose($fp);
 
 		$user_args = apply_filters( 'wp_saml_auth_insert_user', $user_args );
 		$user_id = wp_insert_user( $user_args );
@@ -275,29 +253,17 @@ class CARES_SAML_Public {
 	}
 
 	/**
-	 * Log the user out of the remote auth provider when they log out of WordPress.
-	 *
-	 * @since 1.0.0
-	 *
-	 * @param string $auth_source Which remote identity provider to use.
-	 */
-	public function simplesamlphp_logout() {
-		$auth_source = $this->get_auth_source_from_cookie();
-
-		if ( $auth_source ) {
-			$idp_provider = $this->get_simplesaml_instance( $auth_source );
-			$idp_provider->logout( add_query_arg( 'loggedout', true, wp_login_url() ) );
-		}
-	}
-
-	/**
 	 * Create a new SimpleSAML_Auth_Simple object.
 	 *
 	 * @since 1.0.0
 	 *
 	 * @param string $auth_source Which remote identity provider to use.
+	 *
+	 * @return SimpleSAML_Auth_Simple object
 	 */
-	private function get_simplesaml_instance( $auth_source = 'default-sp' ) {
+	private function get_simplesamlphp_auth_instance( $auth_source = null ) {
+		$auth_source = $this->choose_auth_source( $auth_source );
+
 		$simplesamlphp_path = self::get_option( 'simplesamlphp_autoload' );
 		if ( file_exists( $simplesamlphp_path ) ) {
 			require_once $simplesamlphp_path;
@@ -309,36 +275,290 @@ class CARES_SAML_Public {
 					echo '<div class="message error"><p>' . wp_kses_post( sprintf( __( "WP SAML Auth wasn't able to find the <code>SimpleSAML_Auth_Simple</code> class. Please check the <code>simplesamlphp_autoload</code> configuration option, or <a href='%s'>visit the plugin page</a> for more information.", 'wp-saml-auth' ), 'https://wordpress.org/plugins/wp-saml-auth/' ) ) . '</p></div>';
 				}
 			});
-			return;
+			return false;
 		}
 
 		return new SimpleSAML_Auth_Simple( $auth_source );
 	}
 
 	/**
-	 * Set the user's authentication source as a cookie value.
-	 *
-	 * @since 1.0.0
-	 *
-	 * @param string $auth_source User's auth source.
-	 */
-	private function set_auth_source_cookie( $auth_source ) {
-		setcookie( 'sso_auth_source', $auth_source, time()+60*60*24, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
-	}
-
-	/**
-	 * Get the user's auth source from the cookie we set at login.
+	 * Get the user's simpleSAMLphp session info if it exists.
 	 *
 	 * @since 1.0.0
 	 *
 	 * @return string The id of the remote identity provider.
 	 */
-	private function get_auth_source_from_cookie() {
-		$auth_source = null;
-		if ( ! empty( $_COOKIE['sso_auth_source'] ) ) {
-			$auth_source = $_COOKIE['sso_auth_source'];
+	private function get_simplesamlphp_session() {
+		$session = false;
+
+		$simplesamlphp_path = self::get_option( 'simplesamlphp_autoload' );
+		if ( file_exists( $simplesamlphp_path ) ) {
+			require_once( $simplesamlphp_path );
 		}
-		return $auth_source;
+
+		if ( ! class_exists( 'SimpleSAML_Session' ) ) {
+			add_action( 'admin_notices', function() {
+				if ( current_user_can( 'manage_options' ) ) {
+					echo '<div class="message error"><p>' . wp_kses_post( sprintf( __( "WP SAML Auth wasn't able to find the <code>SimpleSAML_Session</code> class. Please check the <code>simplesamlphp_autoload</code> configuration option, or <a href='%s'>visit the plugin page</a> for more information.", 'wp-saml-auth' ), 'https://wordpress.org/plugins/wp-saml-auth/' ) ) . '</p></div>';
+				}
+			});
+			return;
+		}
+
+		// Get the session details.
+		return SimpleSAML_Session::getSessionFromRequest();
+	}
+
+	/**
+	 * Get the user's auth source as set in the simpleSAMLphp session.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @return string The id of the remote identity provider.
+	 */
+	private function get_auth_source_from_session() {
+		$auth = null;
+		$session = $this->get_simplesamlphp_session();
+		if ( $session ) {
+			$auth  = $session->getAuthorities();
+			if ( is_array( $auth ) ) {
+				$auth = current( $auth );
+			}
+		}
+		return $auth;
+	}
+
+	/**
+	 * Filter or choose an auth source with fallbacks and validation.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string The id of the remote identity provider.
+	 *
+	 * @return string The id of the remote identity provider.
+	 */
+	private function choose_auth_source( $auth = null ) {
+		if ( ! $auth ) {
+			$auth = $this->get_auth_source_from_session();
+		}
+		if ( ! $auth ) {
+			$auth = self::get_option( 'auth_source' );
+		}
+
+		// Validate the auth source
+		$idps = cares_saml_get_available_idps();
+		if ( ! in_array( $auth, $idps ) ) {
+			$auth = 'default-sp';
+		}
+
+		return $auth;
+	}
+
+	// Changing WP behaviors ***************************************************
+
+	/**
+	 * Before logging in, check if the user is required to log in against a
+	 * remote identity provider.
+	 *
+	 * @since    1.0.0
+
+	 * @param null|WP_User|WP_Error $user     WP_User if the user is authenticated.
+	 *                                        WP_Error or null otherwise.
+	 * @param string                $username Username or email address.
+	 * @param string                $password User password
+	 */
+	public function maybe_force_remote_idp_login( $user, $username, $password ) {
+		/*
+		 * If the email address's domain is served by a remote Identity Provider,
+		 * we must not allow the user to log in with his local WP credentials.
+		 * Instead, send the user to simpleSAMLphp for remote auth.
+		 */
+		if ( $user instanceof WP_User ) {
+			// If the WP_User object's already been set, we know the email address.
+			$email_address = $user->user_email;
+		} elseif ( empty( $username ) ) {
+			// If we don't have a $user object or username to work with, bail out.
+			return $user;
+		}
+
+		// If we don't know the email address, try to find it.
+		$email_address = cares_saml_get_email_from_login_form_input( $username, 'current' );
+
+		/*
+		 * If we've got an email address and it belongs to one of our remote
+		 * authorization sources, refer the authorization to that identity provider.
+		 */
+		if ( $email_address && $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
+			$user = $this->do_saml_authentication( $idp );
+		}
+
+		/*
+		 * If this came from the "Sign in with SSO" page, and the login
+		 * didn't go through, determine the error state.
+		 */
+		if ( ! ( $user instanceof WP_User )
+			 && isset( $_REQUEST['login-form-action-parameter'] )
+			 && 'use-sso' == $_REQUEST['login-form-action-parameter'] ) {
+			if ( ! $email_address ) {
+				return new WP_Error( 'cares_saml_auth_lookup_email_required', __( 'Please provide a valid email address.', 'wp-saml-auth' ) );
+			} elseif ( null == cares_saml_get_idp_by_email_address( $email_address ) ) {
+				return new WP_Error( 'cares_saml_auth_lookup_email_required', __( 'No remote identity provider for this site is associated with your email address.', 'wp-saml-auth' ) );
+			}
+		}
+
+		return $user;
+	}
+
+	/**
+	 * Log the user out of the remote auth provider when they log out of WordPress.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $auth_source Which remote identity provider to use.
+	 */
+	public function simplesamlphp_logout( $auth_source = null ) {
+		$auth_source = $this->choose_auth_source( $auth_source );
+
+		if ( $auth_source ) {
+			$idp_provider = $this->get_simplesamlphp_auth_instance( $auth_source );
+			$idp_provider->logout( add_query_arg( 'loggedout', true, wp_login_url() ) );
+		}
+	}
+
+	/**
+	 * Add a login form input that passes the action variable from the login form used.
+	 *
+	 * @since 1.0.0
+	 */
+	public function login_form_add_action_input() {
+		$action = '';
+		if ( ! empty( $_GET['action'] ) ) {
+			$action = $_GET['action'];
+		}
+		?><input type="hidden" name="login-form-action-parameter" id="login-form-action-parameter" value="<?php echo $action; ?>">
+		<?php
+	}
+
+	/**
+	 * Add a hidden login form input that passes the action variable from the login form used.
+	 *
+	 * @since 1.0.0
+	 */
+	public function login_forms_add_sso_link() {
+		printf( __( '<a href="%s" class="log-in-with-sso">Log In Using SSO</a>', 'cares-saml-auth' ), esc_url( add_query_arg( 'action', 'use-sso', wp_login_url() ) ) );
+	}
+
+	/**
+	 * Intercept 'lost password' requests for users whose password are
+	 * managed by a remote identity provider.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param WP_Error object.
+	 */
+	public function check_lost_password_request( $errors ) {
+		$email_address = null;
+
+		// Does this user have a Community Commons account?
+		$username = isset( $_POST['user_login'] ) ? $_POST['user_login'] : '';
+		$email_address = cares_saml_get_email_from_login_form_input( $username, 'current' );
+
+		// If this user exists, do they use an external identity provider?
+		if ( $email_address && $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
+			// If yes, pass them to the identity provider, since we can't help reset their password.
+			$errors->add( 'must_authenticate_with_sso', sprintf( __('<strong>ERROR</strong>: Your password is maintained by a remote identity provider. Visit your <a href="%s">organization\'s login pane</a> to continue.' ), cares_saml_get_login_url_for_idp( $idp, esc_url( add_query_arg( 'action', 'use-sso', wp_login_url() ) ) ) ) );
+		}
+	}
+
+	/**
+	 * Check if the registered email address is authenticated by a remote identity provider.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param array $response Response details to be returned.
+	 */
+	public function registration_check_sso_domain( $response ) {
+		$response['sso_auth_required'] = 0;
+		$response['sso_domain'] = '';
+
+		// Only work if the email address is OK so far.
+		if ( ! empty( $response['valid_address'] ) && $idp = cares_saml_get_idp_by_email_address( $_POST['email'] ) ) {
+			$response['sso_auth_required'] = 1;
+			$response['sso_domain'] = $idp;
+		}
+
+		return $response;
+	}
+
+	/**
+	 * If the new user uses a remote identity provider, give them a long and random password,
+	 * since they'll never need it.
+	 *
+	 * @since 1.0.0
+	 */
+	public function randomize_password_for_sso_users() {
+		// We interact with $_POST variables only here.
+		if ( isset( $_POST['signup_email'] ) && cares_saml_get_idp_by_email_address( $_POST['signup_email'] ) ) {
+			// This user must login via SSO, so make a hard-to-guess password, since the user will never need it.
+			$password = wp_generate_password( rand( 12, 20 ) );
+			$_POST['signup_password'] = $password;
+			$_POST['signup_password_confirm'] = $password;
+		}
+	}
+
+	/**
+	 * For new users that will authenticate against an remote identity provider,
+	 * require authentication before the account is created.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param $user_data WP_User object
+	 */
+	public function maybe_require_validation_against_idp() {
+		$bp = buddypress();
+
+		if ( isset( $bp->signup->email ) && $idp = cares_saml_get_idp_by_email_address( $bp->signup->email ) ) {
+
+			$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
+
+			// Don't continue if simpleSAMLphp isn't set up.
+			if ( ! class_exists( 'SimpleSAML_Auth_Simple' ) || ( ! $idp_provider instanceof SimpleSAML_Auth_Simple ) ) {
+				return false;
+			}
+
+			$auth = $idp_provider->requireAuth();
+			$attributes = $idp_provider->getAttributes();
+
+			// Check that the returned email address matches the address the user submitted.
+			if ( $attributes['mail'][0] == $bp->signup->email ) {
+				// OK, we're satisfied that this user will sync in the future. Allow registration to continue.
+				return;
+			} else {
+				$bp->signup->errors['signup_email'] = __( 'You must use the same email address here that you use to log in at your remote identity provider', 'cares-saml-auth' );
+
+				// Add some useful attributes for new accounts using short-duration cookies.
+				setcookie( 'sso_email', $attributes['mail'][0], time()+60, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
+				setcookie( 'sso_username', $attributes[ 'uid' ][0], time()+60, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
+
+				$display_name = '';
+				if ( ! empty( $attributes['display_name'][0] ) ) {
+					$display_name = $attributes['display_name'][0];
+				} elseif ( ! empty( $attributes['first_name'][0] ) && ! empty( $attributes['last_name'][0] ) ) {
+					$display_name = $attributes['first_name'][0] . ' ' . $attributes['last_name'][0];
+				}
+				setcookie( 'sso_displayname', $display_name, time()+60, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
+			}
+
+			// Don't check the captcha again... it'll fail
+			if ( function_exists( 'Ncr_BP_Registration_Captcha::validate_captcha_registration_field' ) ) {
+				remove_action( 'bp_signup_validate', 'Ncr_BP_Registration_Captcha::validate_captcha_registration_field' );
+			}
+		}
+	}
+
+	// Support for remote login via "CC JSON Login" plugin. ********************
+
+		}
 	}
 
 }
