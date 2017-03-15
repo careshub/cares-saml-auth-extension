@@ -63,6 +63,7 @@ class CARES_SAML_Public {
 
 		// Load public-facing style sheet and JavaScript.
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_styles_scripts' ) );
+		add_action( 'login_enqueue_scripts', array( $this, 'enqueue_login_scripts' ) );
 
 		// Before logging in, check if the user is required to log in against a remote identity provider.
 		add_filter( 'authenticate', array( $this, 'maybe_force_remote_idp_login' ),  21, 3 );
@@ -127,23 +128,8 @@ class CARES_SAML_Public {
 	 * @since    1.0.0
 	 */
 	public function enqueue_styles_scripts() {
-		// Styles
-		// wp_enqueue_style( $this->plugin_slug . '-plugin-styles', plugins_url( 'css/public.css', __FILE__ ), array(), $this->version );
-		// wp_enqueue_script( $this->plugin_slug . '-plugin-scripts', plugins_url( 'js/public.min.js', __FILE__ ), array( 'jquery' ), $this->version, true );
-		//localize data for script
-		// wp_localize_script( $this->plugin_slug . '-plugin-scripts', 'CARES_Spreadsheets_Edit', array(
-		// 		'root' => esc_url_raw( rest_url() ),
-		// 		'nonce' => wp_create_nonce( 'wp_rest' ),
-		// 		'current_user_id' => get_current_user_id(),
-		// 		'ajax_url' => admin_url( 'admin-ajax.php' )
-		// 	)
-		// );
-
-		// IE specific
-		// global $wp_styles;
-		// wp_enqueue_style( $this->plugin_slug . '-ie-plugin-styles', plugins_url( 'css/public-ie.css', __FILE__ ), array(), $this->version );
-		// $wp_styles->add_data( $this->plugin_slug . '-ie-plugin-styles', 'conditional', 'lte IE 9' );
-
+		// Scripts
+		wp_enqueue_script( $this->plugin_slug . '-plugin-script', plugins_url( 'js/public.js', __FILE__ ), array( 'jquery' ), $this->version, true );
 	}
 
 
@@ -152,6 +138,14 @@ class CARES_SAML_Public {
 	 *
 	 * @since    1.0.0
 	 */
+	public function enqueue_login_scripts() {
+		// Scripts
+		wp_enqueue_script( $this->plugin_slug . '-login-plugin-scripts', plugins_url( 'js/login.js', __FILE__ ), array( 'jquery' ), $this->version, true );
+
+		wp_localize_script( $this->plugin_slug . '-login-plugin-scripts', 'SSO_login', array(
+				'sso_login_url' => esc_url( add_query_arg( 'action', 'use-sso', wp_login_url() ) ),
+			)
+		);
 	}
 
 	// Working with simpleSAMLphp **********************************************
