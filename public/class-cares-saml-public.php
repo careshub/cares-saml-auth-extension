@@ -87,6 +87,11 @@ class CARES_SAML_Public {
 		// For new users that authenticate against an SSO, require authentication before the account is created.
 		add_action( 'bp_signup_validate', array( $this, 'maybe_require_validation_against_idp' ), 8 );
 
+		// Support for remote login enabled by "CC JSON Login" plugin.
+		// If a user must log in with a remote identity provider, return an error and a login url.
+		add_action( 'cc_json_login_before_login', array( $this, 'maybe_stop_cc_json_login' ) );
+		// Maybe log the user in during a cookie check.
+		add_action( 'cc_json_login_before_cookie_check', array( $this, 'filter_cc_json_login_status_check' ) );
 	}
 
 	/**
@@ -552,6 +557,82 @@ class CARES_SAML_Public {
 
 	// Support for remote login via "CC JSON Login" plugin. ********************
 
+	/**
+	 * If a user must log in with a remote identity provider, return an error and a login url.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $username The login name (or email address) provided by the user.
+	 */
+	public function maybe_stop_cc_json_login( $username ) {
+		if ( $email_address = cares_saml_get_email_from_login_form_input( $username, 'strict' ) ) {
+			if ( $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
+
+				$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
+				// If this user isn't authenticated, stop processing and send an error message back.
+				// Otherwise, we'll let the wp_signon() happen.
+				if ( ! $idp_provider instanceof SimpleSAML_Auth_Simple || ! $idp_provider->isAuthenticated() ) {
+					$response = array(
+						'userid' 	 => 0,
+						'message' 	 => 'This user must log in using a remote identity provider.',
+						'sso_login'  => cares_saml_get_login_url_for_idp( $idp ),
+					);
+
+					// Send response.
+					header("content-type: text/javascript; charset=utf-8");
+					header("Access-Control-Allow-Origin: *");
+					echo htmlspecialchars($_GET['callback']) . '(' . json_encode( $response ) . ')';
+
+					exit;
+				}
+
+			}
+		}
+	}
+
+	/**
+	 * If a user has an active session set up with a remote identity provider,
+	 * we may be able to perform a signon when an AJAX login check is performed.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @return JSON response|void
+	 */
+	public function filter_cc_json_login_status_check() {
+
+		if ( ! is_user_logged_in() && $idp = $this->get_auth_source_from_session() ) {
+			$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
+
+			if ( $idp_provider instanceof SimpleSAML_Auth_Simple && $idp_provider->isAuthenticated() ) {
+
+				$attributes = $idp_provider->getAttributes();
+				$get_user_by = self::get_option( 'get_user_by' );
+				$attribute = self::get_option( "user_{$get_user_by}_attribute" );
+				if ( empty( $attributes[ $attribute ][0] ) ) {
+					return new WP_Error( 'wp_saml_auth_missing_attribute', sprintf( esc_html__( '"%s" attribute missing in SimpleSAMLphp response. Please contact your administrator.', 'wp-saml-auth' ), $get_user_by ) );
+				}
+
+				$user = wp_signon( array( 'user_login' => $attributes[ $attribute ][0], 'user_password' => 'placeholder' ) );
+
+				if ( ( $user instanceof WP_User ) && $user->ID ) {
+					// Get the user's hubs
+					$groups = groups_get_user_groups( $user->ID );
+					$group_ids = $groups['groups'];
+					$response = array(
+						'userid' 	=> $user->ID,
+						'login' 	=> $user->user_login,
+						'email' 	=> $user->user_email,
+						'groups'	=> $group_ids
+					);
+
+					// Send response and stop processing.
+					header("content-type: text/javascript; charset=utf-8");
+					header("Access-Control-Allow-Origin: *");
+					echo htmlspecialchars($_GET['callback']) . '(' . json_encode( $response ) . ')';
+
+					exit;
+				}
+			}
 		}
 	}
 
