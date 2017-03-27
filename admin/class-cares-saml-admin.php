@@ -213,7 +213,7 @@ class CARES_SAML_Admin {
 		<p>Checking these check boxes is the last step, and then users who have an email address with a chosen domain <strong>will be required</strong> to log in against that domain's identity provider.</p>
 		<hr />
 		<fieldset id="sso_idp_associations">
-			<legend class="screen-reader-text"><?php _ex( 'Choose which SSO rules to enable for this site.', 'cares-saml-auth' ); ?></legend>
+			<legend class="screen-reader-text"><?php _e( 'Choose which SSO rules to enable for this site.', 'cares-saml-auth' ); ?></legend>
 			<?php foreach( $all_idps as $email_domain => $idp ) : ?>
 				<input type="checkbox" name="sso_required_domains[]" value="<?php echo $email_domain; ?>" id="sso_idp_associations-<?php echo $email_domain; ?>"<?php if ( in_array( $email_domain, $selected_idps ) ) { echo ' checked="checked"'; } ?>> <label for="sso_idp_associations-<?php echo $email_domain; ?>"> Users using the email domain <code><?php echo $email_domain; ?></code> must authenticate with <code><?php echo $idp; ?></code></label><br />
 			<?php endforeach; ?>

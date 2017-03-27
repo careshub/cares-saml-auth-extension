@@ -30,10 +30,6 @@ function cares_saml_class_init() {
 	// Helper functions
 	require_once( $basepath . 'includes/functions.php' );
 
-	// Template output functions
-	// require_once( plugin_dir_path( __FILE__ ) . 'public/views/template-tags.php' );
-	// require_once( plugin_dir_path( __FILE__ ) . 'public/views/shortcodes.php' );
-
 	// The main class
 	require_once( $basepath . 'public/class-cares-saml-public.php' );
 	$public_class = new CARES_SAML_Public();
@@ -49,14 +45,6 @@ function cares_saml_class_init() {
 }
 add_action( 'init', 'cares_saml_class_init' );
 
-/**
- * Register hooks that are fired when the plugin is activated or deactivated.
- * When the plugin is deleted, the uninstall.php file is loaded.
- *
- */
-// require_once plugin_dir_path( __FILE__ ) . 'includes/cares-saml-auth-activator.php';
-// register_activation_hook( __FILE__, array( 'Cares_SAML_Activator', 'activate' ) );
-// register_deactivation_hook( __FILE__, array( 'Cares_SAML_Activator', 'deactivate' ) );
 
 /**
  * Helper function.
