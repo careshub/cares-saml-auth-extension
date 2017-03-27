@@ -533,11 +533,11 @@ class CARES_SAML_Public {
 			$attributes = $idp_provider->getAttributes();
 
 			// Check that the returned email address matches the address the user submitted.
-			if ( $attributes['mail'][0] == $bp->signup->email ) {
+			if ( strtolower( $attributes['mail'][0] ) == strtolower( $bp->signup->email ) ) {
 				// OK, we're satisfied that this user will sync in the future. Allow registration to continue.
 				return;
 			} else {
-				$bp->signup->errors['signup_email'] = __( 'You must use the same email address here that you use to log in at your remote identity provider', 'cares-saml-auth' );
+				$bp->signup->errors['signup_email'] = sprintf( __( 'You must use the same email address here that is associated with your account at %s. If you are not %s, please log out of %s to continue.', 'cares-saml-auth' ), $idp, $attributes['mail'][0], $idp );
 
 				// Add some useful attributes for new accounts using short-duration cookies.
 				setcookie( 'sso_email', $attributes['mail'][0], time()+60, COOKIEPATH, COOKIE_DOMAIN, is_ssl() );
