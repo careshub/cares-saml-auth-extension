@@ -92,6 +92,10 @@ class CARES_SAML_Public {
 		add_action( 'cc_json_login_before_login', array( $this, 'maybe_stop_cc_json_login' ) );
 		// Maybe log the user in during a cookie check.
 		add_action( 'cc_json_login_before_cookie_check', array( $this, 'filter_cc_json_login_status_check' ) );
+
+		// Support for a "log into WP redirect" stop.
+		add_action( 'wp_ajax_nopriv_cares-saml-auth-wp-login', array( $this, 'catch_ajax_post_auth_redirect' ) );
+		add_action( 'wp_ajax_cares-saml-auth-wp-login', array( $this, 'catch_ajax_post_auth_redirect' ) );
 	}
 
 	/**
@@ -634,6 +638,43 @@ class CARES_SAML_Public {
 				}
 			}
 		}
+	}
+
+	/**
+	 * For remote logins via an AJAX request, the user's request is sent to:
+	 * - simpleSAMLphp install at the login host
+	 * - remote identity provider
+	 * - simpleSAMLphp install at the login host
+	 * - /wp-admin/admin-ajax.php at the login host (this step is handled by this function)
+	 * - back to where the user started from (maps.cc.org or similar)
+	 *
+	 * @since 1.0.0
+	 *
+	 * @return JSON response|void
+	 */
+	public function catch_ajax_post_auth_redirect() {
+
+		$redirect = isset( $_REQUEST['redirect'] ) ? $_REQUEST['redirect'] : site_url();
+
+		if ( ! is_user_logged_in() && $idp = $this->get_auth_source_from_session() ) {
+			$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
+
+			if ( $idp_provider instanceof SimpleSAML_Auth_Simple && $idp_provider->isAuthenticated() ) {
+
+				$attributes = $idp_provider->getAttributes();
+				$get_user_by = self::get_option( 'get_user_by' );
+				$attribute = self::get_option( "user_{$get_user_by}_attribute" );
+				if ( empty( $attributes[ $attribute ][0] ) ) {
+					return new WP_Error( 'wp_saml_auth_missing_attribute', sprintf( esc_html__( '"%s" attribute missing in SimpleSAMLphp response. Please contact your administrator.', 'wp-saml-auth' ), $get_user_by ) );
+				}
+
+				$user = wp_signon( array( 'user_login' => $attributes[ $attribute ][0], 'user_password' => 'placeholder' ) );
+
+			}
+		}
+
+		wp_redirect( $redirect );
+		die();
 	}
 
 }

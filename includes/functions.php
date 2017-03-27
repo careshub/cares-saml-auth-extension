@@ -52,15 +52,33 @@ function cares_saml_get_available_idps() {
  * @return string URL that will redirect to auth provider.
  */
 function cares_saml_get_login_url_for_idp( $idp = null, $return_to = null ) {
-	$ipd_args = array( 'AuthId' => $idp );
+	/*
+	 * Double redirect approach adds a stop at the WP site after authentication.
+	 * Example flow: maps.cc -> cc.org/simplesaml -> remote auth service
+	 * -> cc.org/admin-ajax.php to login -> maps.cc.org
+	 * Example url: https://www.communitycommons.org/simplesaml/module.php/core/as_login.php?AuthId=testshib.org&ReturnTo=https%3A%2F%2Fwww.communitycommons.org%2Fwp-admin%2Fadmin-ajax.php%3Faction%3Dcares-saml-auth-wp-login%26redirect%3Dhttps%3A%2F%2Fmaps.communitycommons.org%2Fviewer%2F
+	 */
+	$ajax_args = array(
+		'action' => 'cares-saml-auth-wp-login',
+	);
+
 	// We want to send the user back to the current page if it's known.
 	if ( $return_to ) {
-		$ipd_args['ReturnTo'] = $return_to;
+		$ajax_args['redirect'] = $return_to;
 	} elseif ( is_null( $return_to ) && $_SERVER['HTTP_REFERER'] ) {
-		$ipd_args['ReturnTo'] = $_SERVER['HTTP_REFERER'];
+		$ajax_args['redirect'] = $_SERVER['HTTP_REFERER'];
 	}
 
-	return add_query_arg( $ipd_args, site_url( '/simplesaml/module.php/core/as_login.php' ) );
+	$ipd_args = array(
+		'AuthId'   => $idp,
+		// We'll drop by WP on the way back home, to log in.
+		// Url encode so that simpleSAML ignores the admin-ajax parameters.
+		'ReturnTo' => urlencode( add_query_arg( $ajax_args, admin_url( 'admin-ajax.php' ) ) )
+	 );
+
+	$url = add_query_arg( $ipd_args, site_url( '/simplesaml/module.php/core/as_login.php' ) );
+
+	return $url;
 }
 
 
