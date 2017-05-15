@@ -69,18 +69,23 @@ class CARES_SAML_Public {
 		add_filter( 'authenticate', array( $this, 'maybe_force_remote_idp_login' ),  21, 3 );
 
 		// Log the user out of the remote auth provider when they log out of WordPress.
+		// Not using this at the moment, because it seems weird to logout upstream.
 		// add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
 
-		// Change the behavior of wp-login.php
-		// Add a hidden input so we know when requests come from the "Single Sign on" form.
+		// Change the behavior of login forms
+		// Add a hidden input on wp-login.php so we know when requests come from the "Single Sign on" form.
 		add_action( 'login_form', array( $this, 'login_form_add_action_input' ) );
-		// Add an SSO link to the bottom of the login forms.
+		// Add an SSO link to the bottom of login forms in the CC theme.
 		add_action( 'cares_after_login_form', array( $this, 'login_forms_add_sso_link' ) );
 
 		// Intercept password reset requests for users that authenticate against external identity providers
 		add_action( 'lostpassword_post', array( $this, 'check_lost_password_request' ) );
 
-		// Registration improvements
+		// Registration improvements - WordPress registration process.
+		// Replace the "new account, set password" email with "welcome, please log in" email.
+		add_filter( 'wp_mail', array( $this, 'filter_new_account_email' ) );
+
+		// Registration improvements - BuddyPress specific.
 		add_filter( 'cc_registration_extras_email_validate_message', array( $this, 'registration_check_sso_domain' ) );
 		// Make a random password for remote IdP-authenticated users
 		add_filter( 'bp_signup_pre_validate', array( $this, 'randomize_password_for_sso_users' ), 20 );
@@ -449,6 +454,45 @@ class CARES_SAML_Public {
 	 */
 	public function login_forms_add_sso_link() {
 		printf( __( '<a href="%s" class="log-in-with-sso">Log In Using SSO</a>', 'cares-saml-auth' ), esc_url( add_query_arg( 'action', 'use-sso', wp_login_url() ) ) );
+	}
+
+	/**
+	 * If the new vanilla-WP-created account must use SSO, change the
+	 * "set password" email.
+	 *
+	 * Vanilla WP registration works like this:
+	 *    - User signs up with username and email, but does not choose a password.
+	 *    - WP creates a random password, then generates a "set password" email
+	 *      that relies on the standard WP "reset password" process.
+	 *    - Once you reset your password, you're invited to log in.
+	 *
+	 * @param array $args A compacted array of wp_mail() arguments, including the "to" email,
+	 *                    subject, message, headers, and attachments values.
+	 */
+	public function filter_new_account_email( $args ) {
+		if ( strpos( $args['subject'], 'Your username and password info' ) ) {
+
+			if ( ! empty( $args['to'] ) && $idp = cares_saml_get_idp_by_email_address( $args['to'] ) ) {
+				$user = get_user_by( 'email', $args['to'] );
+				$locale = function_exists( 'get_user_locale' ) ? get_user_locale( $user ) : get_locale();
+				$switched_locale = switch_to_locale( $locale );
+
+				$blogname = wp_specialchars_decode( get_option( 'blogname' ), ENT_QUOTES );
+				$args['subject'] = sprintf( __( 'Thank you for joining %s' ), $blogname );
+
+				$message = sprintf( __( 'Username: %s'), $user->user_login ) . "\r\n\r\n";
+				$message .= sprintf( __( 'Your password will be maintained by the authentication service at %s.' ), $idp ) . "\r\n\r\n";
+				$message .= __( 'To log in, visit the following address:' ) . "\r\n\r\n";
+				$message .= wp_login_url() . "\r\n";
+
+				$args['message'] = $message;
+
+				if ( $switched_locale ) {
+					restore_previous_locale();
+				}
+			}
+		}
+		return $args;
 	}
 
 	/**
