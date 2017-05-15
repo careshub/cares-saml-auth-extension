@@ -390,7 +390,9 @@ class CARES_SAML_Public {
 		}
 
 		// If we don't know the email address, try to find it.
-		$email_address = cares_saml_get_email_from_login_form_input( $username, 'current' );
+		// If auto account provision is not allowed, limit check to existing users.
+		$auto_provision = ( self::get_option( 'auto_provision' ) ) ? 'any' : 'current';
+		$email_address = cares_saml_get_email_from_login_form_input( $username, $auto_provision );
 
 		/*
 		 * If we've got an email address and it belongs to one of our remote
@@ -613,7 +615,7 @@ class CARES_SAML_Public {
 	 * @param string $username The login name (or email address) provided by the user.
 	 */
 	public function maybe_stop_cc_json_login( $username ) {
-		if ( $email_address = cares_saml_get_email_from_login_form_input( $username, 'strict' ) ) {
+		if ( $email_address = cares_saml_get_email_from_login_form_input( $username, 'current' ) ) {
 			if ( $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
 
 				$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
