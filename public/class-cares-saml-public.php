@@ -68,6 +68,9 @@ class CARES_SAML_Public {
 		// Before logging in, check if the user is required to log in against a remote identity provider.
 		add_filter( 'authenticate', array( $this, 'maybe_force_remote_idp_login' ),  21, 3 );
 
+		// If the user has followed a "login to a specific remote IDP" url, forward them to their IDP.
+		add_action( 'login_form_sso_forward', array( $this, 'forward_login_to_remote_idp' ) );
+
 		// Log the user out of the remote auth provider when they log out of WordPress.
 		// Not using this at the moment, because it seems weird to logout upstream.
 		// add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
@@ -156,8 +159,24 @@ class CARES_SAML_Public {
 		// Scripts
 		wp_enqueue_script( $this->plugin_slug . '-login-plugin-scripts', plugins_url( 'js/login.js', __FILE__ ), array( 'jquery' ), $this->version, true );
 
+		$sso_login_url = wp_login_url();
+		$possible_domains = cares_saml_get_sso_domains_for_site();
+		if ( ! empty( $possible_domains ) ) {
+			// If there is only one remote IDP, send the user to it.
+			if ( 1 == count( $possible_domains ) ) {
+				$q_args = array(
+					'action' => 'sso_forward',
+					'sso-forward-to' => current( $possible_domains ),
+				);
+				$sso_login_url = esc_url( add_query_arg( $q_args, $sso_login_url ) );
+			// If multiple domains are possible, we can't guess which one to use (yet).
+			} else {
+				$sso_login_url = esc_url( add_query_arg( 'action', 'use-sso', $sso_login_url ) );
+			}
+		}
+
 		wp_localize_script( $this->plugin_slug . '-login-plugin-scripts', 'SSO_login', array(
-				'sso_login_url' => esc_url( add_query_arg( 'action', 'use-sso', wp_login_url() ) ),
+				'sso_login_url' => $sso_login_url,
 			)
 		);
 	}
@@ -242,9 +261,6 @@ class CARES_SAML_Public {
 		if ( is_wp_error( $user_id ) ) {
 			return $user_id;
 		} else {
-
-			// Set the auth source as a cookie to use on logout.
-			$this->set_auth_source_cookie( $idp );
 
 			/**
 			 * Fires after a new user is provisioned via SAML authentication.
@@ -376,6 +392,7 @@ class CARES_SAML_Public {
 	 * @param string                $password User password
 	 */
 	public function maybe_force_remote_idp_login( $user, $username, $password ) {
+		$idp = null;
 		/*
 		 * If the email address's domain is served by a remote Identity Provider,
 		 * we must not allow the user to log in with his local WP credentials.
@@ -384,6 +401,8 @@ class CARES_SAML_Public {
 		if ( $user instanceof WP_User ) {
 			// If the WP_User object's already been set, we know the email address.
 			$email_address = $user->user_email;
+		} else if ( isset( $_GET['sso-forward-to'] ) ) {
+			$idp = $_GET['sso-forward-to'];
 		} elseif ( empty( $username ) ) {
 			// If we don't have a $user object or username to work with, bail out.
 			return $user;
@@ -394,11 +413,14 @@ class CARES_SAML_Public {
 		$auto_provision = ( self::get_option( 'auto_provision' ) ) ? 'any' : 'current';
 		$email_address = cares_saml_get_email_from_login_form_input( $username, $auto_provision );
 
+		// If an IDP has been specified, forward the user on.
+		if ( ! is_null( $idp ) ) {
+			$user = $this->do_saml_authentication( $idp );
 		/*
 		 * If we've got an email address and it belongs to one of our remote
 		 * authorization sources, refer the authorization to that identity provider.
 		 */
-		if ( $email_address && $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
+		} else if ( $email_address && $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
 			$user = $this->do_saml_authentication( $idp );
 		}
 
@@ -417,6 +439,20 @@ class CARES_SAML_Public {
 		}
 
 		return $user;
+	}
+
+	/**
+	 * If the user has followed a "login to a specific remote IDP" url,
+	 * forward them to their IDP.
+	 * This is hooked to a custom action in wp-login.php.
+	 *
+	 * @since 1.0.1
+	 */
+	public function forward_login_to_remote_idp() {
+		wp_signon( array(
+			'user_login' => 'remote-sso-user',
+			'user_password' => 'notrealpw'
+		) );
 	}
 
 	/**
@@ -455,7 +491,33 @@ class CARES_SAML_Public {
 	 * @since 1.0.0
 	 */
 	public function login_forms_add_sso_link() {
-		printf( __( '<a href="%s" class="log-in-with-sso">Log In Using SSO</a>', 'cares-saml-auth' ), esc_url( add_query_arg( 'action', 'use-sso', wp_login_url() ) ) );
+		$possible_domains = cares_saml_get_sso_domains_for_site();
+
+		$sso_login_url = wp_login_url();
+		$class = null;
+		$possible_domains = cares_saml_get_sso_domains_for_site();
+		if ( ! empty( $possible_domains ) ) {
+			// If there is only one remote IDP, send the user to it.
+			if ( 1 == count( $possible_domains ) ) {
+				$q_args = array(
+					'action' => 'sso_forward',
+					'sso-forward-to' => current( $possible_domains ),
+				);
+				$sso_login_url = esc_url( add_query_arg( $q_args, $sso_login_url ) );
+				$class = 'log-in-with-sso-forward';
+			// If multiple domains are possible, we can't guess which one to use (yet).
+			} else {
+				$sso_login_url = esc_url( add_query_arg( 'action', 'use-sso', $sso_login_url ) );
+				$class = 'log-in-with-sso';
+			}
+		}
+
+		if ( $class ) {
+			printf( __( '<a href="%s" class="%s">Log In Using SSO</a>', 'cares-saml-auth' ),
+				esc_url( $sso_login_url ),
+				$class
+			);
+		}
 	}
 
 	/**
