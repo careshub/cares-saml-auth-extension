@@ -189,6 +189,76 @@ function cares_saml_get_email_from_login_form_input( $username = '', $limit = 'c
 }
 
 /**
+ * Fetch an array of Identity Providers that are configured for use on this site.
+ *
+ * @since 1.2.0
+ *
+ * @return array
+ */
+function cares_saml_get_idps_for_site() {
+	$sso_domains = cares_saml_get_sso_domains_for_site();
+	$all_idps    = cares_saml_get_idp_associations();
+	$sso_idps    = array();
+	foreach ( $all_idps as $email => $idp ) {
+		if ( in_array( $email, $sso_domains ) ) {
+			$sso_idps[] = $idp;
+		}
+	}
+	return array_unique( $sso_idps );
+}
+
+
+/**
+ * Generate the SSO login url.
+ * If only one Identity Provider is specified, use the "sso_forward" action version.
+ * If more than one IdP is specified, use the "use-sso" action version.
+ *
+ * @since 1.2.0
+ *
+ * @return string
+ */
+function cares_saml_create_sso_login_url() {
+	// @TODO: Add any existing current query args
+	// $q_args = ! empty( $_GET ) ? $_GET : array();
+	$q_args = array();
+	// if ( isset( $q_args['redirect_to'] ) ) {
+	// 	$q_args['redirect_to'] = esc_url_raw( $_GET['redirect_to'] );
+	// }
+	$sso_login_url = wp_login_url();
+	$possible_idps = cares_saml_get_idps_for_site();
+	if ( ! empty( $possible_idps ) ) {
+		// If there is only one remote IDP, send the user to it.
+		if ( 1 === count( $possible_idps ) ) {
+			$sso_args = array(
+				'action' => 'sso_forward',
+				'sso-forward-to' => current( $possible_idps ),
+			);
+		// If multiple domains are possible, we can't guess which one to use (yet).
+		} else {
+			$sso_args = array(
+				'action' => 'use-sso',
+			);
+		}
+		$q_args = array_merge( $q_args, $sso_args );
+		$sso_login_url = add_query_arg( $q_args, $sso_login_url );
+	}
+	return $sso_login_url;
+}
+
+/**
+ * Has the site admin checked the "must use SSO for login" box?
+ *
+ * @since 1.2.0
+ *
+ * @return bool
+ */
+function cares_saml_must_use_remote_auth() {
+	// @TODO: Respect permit_wp_login setting?
+	$must_sso = get_option( 'sso_required_all_logins' );
+	return (bool) $must_sso;
+}
+
+/**
  * Provides default options for WP SAML Auth.
  *
  * @param mixed $value

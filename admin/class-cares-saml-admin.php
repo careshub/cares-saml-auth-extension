@@ -176,7 +176,7 @@ class CARES_SAML_Admin {
 	 */
 	public function settings_init() {
 
-		// Setting for showing groups directory as tree.
+		// Select SimpleSAML identity providers to use with this site.
 		add_settings_section(
 			'cares_sso_section_1', // Section ID
 			__( 'Configure Remote Identity Providers for this Site.', 'cares-saml-auth' ), // Title
@@ -199,11 +199,43 @@ class CARES_SAML_Admin {
 			'cares_sso_section_1' // Section ID
 		);
 
+		// Force logins for be handled by a remote identity provider.
+		add_settings_section(
+			'cares_sso_section_2', // Section ID
+			__( 'Require logins to use SSO remote authentication.', 'cares-saml-auth' ), // Title
+			array( $this, 'render_cares_sso_section_2' ), // Callback
+			$this->plugin_slug // Page
+		);
+
+		register_setting(
+			$this->plugin_slug, // Option group
+			'sso_required_all_logins', // Option ID
+			array(
+				'sanitize_callback' => 'absint',
+			)
+		);
+		add_settings_field(
+			'sso_required_all_logins', // Option ID
+			__( 'Require all logins to be handled by remote identity providers. Do not allow local logins via WordPress.', 'cares-saml-auth' ), // Title
+			array( $this, 'render_sso_required_all_logins' ), // Render callback
+			$this->plugin_slug, // Page
+			'cares_sso_section_2' // Section ID
+		);
+
 	}
 
-	public function render_cares_sso_section_1() {
-		// echo "section callback";
-	}
+	/**
+	 * Render first section introduction. No output.
+	 *
+	 * @since    1.0.0
+	 */
+	public function render_cares_sso_section_1() {}
+
+	/**
+	 * Render first section's form inputs.
+	 *
+	 * @since    1.0.0
+	 */
 	public function render_email_address_idp_associations() {
 		$value = get_option( 'sso_idp_associations' );
 		$all_idps = cares_saml_get_idp_associations();
@@ -217,6 +249,28 @@ class CARES_SAML_Admin {
 			<?php foreach( $all_idps as $email_domain => $idp ) : ?>
 				<input type="checkbox" name="sso_required_domains[]" value="<?php echo $email_domain; ?>" id="sso_idp_associations-<?php echo $email_domain; ?>"<?php if ( in_array( $email_domain, $selected_idps ) ) { echo ' checked="checked"'; } ?>> <label for="sso_idp_associations-<?php echo $email_domain; ?>"> Users using the email domain <code><?php echo $email_domain; ?></code> must authenticate with <code><?php echo $idp; ?></code></label><br />
 			<?php endforeach; ?>
+		</fieldset>
+
+		<?php
+	}
+
+	/**
+	 * Render second section introduction. No output.
+	 *
+	 * @since    1.2.0
+	 */
+	public function render_cares_sso_section_2() {}
+
+	/**
+	 * Render second section form inputs.
+	 *
+	 * @since    1.2.0
+	 */
+	public function render_sso_required_all_logins() {
+		?>
+		<fieldset id="sso_required_for_all_logins">
+			<legend class="screen-reader-text"><?php _e( 'Require all logins to be handled by remote identity providers. Do not allow local logins via WordPress.', 'cares-saml-auth' ); ?></legend>
+			<input type="checkbox" name="sso_required_all_logins" value=1 id="sso_required_for_all_logins_checkbox"<?php checked( cares_saml_must_use_remote_auth() ); ?>> <label for="sso_required_for_all_logins_checkbox"> <?php _e( 'Require all logins to be handled by remote identity providers. Do not allow local logins via WordPress.', 'cares-saml-auth' ); ?></label>
 		</fieldset>
 
 		<?php

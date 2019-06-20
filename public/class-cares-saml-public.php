@@ -69,13 +69,22 @@ class CARES_SAML_Public {
 		add_filter( 'authenticate', array( $this, 'maybe_force_remote_idp_login' ),  21, 3 );
 
 		// If the user has followed a "login to a specific remote IDP" url, forward them to their IDP.
+		// This action is called when ?action=sso_forward query arg is present on login form.
 		add_action( 'login_form_sso_forward', array( $this, 'forward_login_to_remote_idp' ) );
 
 		// Log the user out of the remote auth provider when they log out of WordPress.
 		// Not using this at the moment, because it seems weird to logout upstream.
 		// add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
 
+		add_filter( 'login_redirect', array( $this, 'maybe_redirect_after_saml_auth' ), 999, 3 );
+
 		// Change the behavior of login forms
+		// Store any redirect_to strings as cookies for later use.
+		add_action( 'login_init', array( $this, 'store_redirect_to_as_cookie' ) );
+
+		// Maybe force remote authentication
+		add_action( 'login_init', array( $this, 'maybe_pass_login_request_directly_to_idp' ), 12 );
+
 		// Add a hidden input on wp-login.php so we know when requests come from the "Single Sign on" form.
 		add_action( 'login_form', array( $this, 'login_form_add_action_input' ) );
 		// Add an SSO link to the bottom of login forms in the CC theme.
@@ -159,24 +168,8 @@ class CARES_SAML_Public {
 		// Scripts
 		wp_enqueue_script( $this->plugin_slug . '-login-plugin-scripts', plugins_url( 'js/login.js', __FILE__ ), array( 'jquery' ), $this->version, true );
 
-		$sso_login_url = wp_login_url();
-		$possible_domains = cares_saml_get_sso_domains_for_site();
-		if ( ! empty( $possible_domains ) ) {
-			// If there is only one remote IDP, send the user to it.
-			if ( 1 == count( $possible_domains ) ) {
-				$q_args = array(
-					'action' => 'sso_forward',
-					'sso-forward-to' => current( $possible_domains ),
-				);
-				$sso_login_url = esc_url( add_query_arg( $q_args, $sso_login_url ) );
-			// If multiple domains are possible, we can't guess which one to use (yet).
-			} else {
-				$sso_login_url = esc_url( add_query_arg( 'action', 'use-sso', $sso_login_url ) );
-			}
-		}
-
 		wp_localize_script( $this->plugin_slug . '-login-plugin-scripts', 'SSO_login', array(
-				'sso_login_url' => $sso_login_url,
+				'sso_login_url' => cares_saml_create_sso_login_url(),
 			)
 		);
 	}
@@ -449,10 +442,58 @@ class CARES_SAML_Public {
 	 * @since 1.0.1
 	 */
 	public function forward_login_to_remote_idp() {
-		wp_signon( array(
-			'user_login' => 'remote-sso-user',
-			'user_password' => 'notrealpw'
-		) );
+		if ( ! is_user_logged_in() && $_GET['action'] === 'sso_forward' ) {
+			wp_signon( array(
+				'user_login' => 'remote-sso-user',
+				'user_password' => 'notrealpw'
+			) );
+		}
+	}
+
+	/**
+	 * If the site requires loggin in using an IDP,
+	 * forward the user to their IDP.
+	 *
+	 * @since 1.1.0
+	 */
+	public function maybe_pass_login_request_directly_to_idp() {
+		if ( ! is_user_logged_in() && cares_saml_must_use_remote_auth() ) {
+			// Resolve logouts to the home page.
+			if ( isset( $_GET['loggedout'] ) ) {
+				wp_redirect( site_url() );
+				exit();
+			// Avoid redirect loops.
+			} else if ( ! isset( $_GET['action'] ) || ! in_array( $_GET['action'], array( 'sso_forward', 'use-sso' ), true ) ) {
+				wp_redirect( cares_saml_create_sso_login_url() );
+				exit();
+			}
+		}
+	}
+
+	/**
+	 * Upon login form init, store any redirect_to query args
+	 * as cookies so we can access those values after login.
+	 *
+	 * @since 1.1.0
+	 */
+	public function store_redirect_to_as_cookie() {
+		// Before passing the user off to the IDP, store the redirect_to as a cookie for use after login.
+		if ( ! empty( $_GET['redirect_to'] ) ) {
+			setcookie( 'redirect_to', $_GET['redirect_to'] );
+		}
+	}
+
+	/**
+	 * If a redirect_to cookie is set use it to calculate redirect after login.
+	 *
+	 * @since 1.1.0
+	 */
+	public function maybe_redirect_after_saml_auth( $redirect_to, $requested_redirect_to, $user  ) {
+		if ( isset( $_COOKIE['redirect_to'] ) ) {
+			$redirect_to = $_COOKIE['redirect_to'];
+		}
+
+		return $redirect_to;
 	}
 
 	/**
@@ -493,23 +534,11 @@ class CARES_SAML_Public {
 	public function login_forms_add_sso_link() {
 		$possible_domains = cares_saml_get_sso_domains_for_site();
 
-		$sso_login_url = wp_login_url();
-		$class = null;
-		$possible_domains = cares_saml_get_sso_domains_for_site();
-		if ( ! empty( $possible_domains ) ) {
-			// If there is only one remote IDP, send the user to it.
-			if ( 1 == count( $possible_domains ) ) {
-				$q_args = array(
-					'action' => 'sso_forward',
-					'sso-forward-to' => current( $possible_domains ),
-				);
-				$sso_login_url = esc_url( add_query_arg( $q_args, $sso_login_url ) );
-				$class = 'log-in-with-sso-forward';
-			// If multiple domains are possible, we can't guess which one to use (yet).
-			} else {
-				$sso_login_url = esc_url( add_query_arg( 'action', 'use-sso', $sso_login_url ) );
-				$class = 'log-in-with-sso';
-			}
+		$sso_login_url = cares_saml_create_sso_login_url();
+		if ( stripos( $sso_login_url, 'sso_forward' ) ) {
+			$class = 'log-in-with-sso-forward';
+		} else {
+			$class = 'log-in-with-sso';
 		}
 
 		if ( $class ) {

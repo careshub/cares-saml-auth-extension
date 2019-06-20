@@ -3,7 +3,7 @@
  * @package Cares_Saml_Auth
  * @wordpress-plugin
  * Plugin Name:       CARES SAML Auth Extension
- * Version:           1.0.0
+ * Version:           1.2.0
  * Description:       Extends the SAML authentication plugin for WordPress, using SimpleSAMLphp.
  * Author:            dcavins
  * Text Domain:       cares-saml-auth
@@ -69,5 +69,5 @@ function cares_saml_get_plugin_base_path() {
  * @return string Current version of plugin.
  */
 function cares_saml_get_plugin_version() {
-	return '1.0.0';
+	return '1.2.0';
 }
