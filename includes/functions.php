@@ -28,6 +28,7 @@ function cares_saml_get_idp_associations() {
 		'umh.edu'      => 'umsystem.edu',
 		'mizzou.edu'   => 'umsystem.edu',
 		'umsl.edu'     => 'umsystem.edu',
+		'*.*'          => 'extension2.missouri.edu',
 	);
 }
 
@@ -314,7 +315,9 @@ function cares_wpsa_filter_option( $value, $option_name ) {
 		/**
 		 * Attribute by which to get a WordPress user for a SAML user.
 		 *
-		 * @param string Supported options are 'email' and 'login'.
+		 * @param string Possible ptions are 'email', 'login', or 'idp_user_id'.
+		 *
+		 * 'email' and 'login' options use WP get_user_by(), 'idp_user_id' looks user up via usermeta.
 		 */
 		'get_user_by'            => 'email',
 		/**

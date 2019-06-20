@@ -198,17 +198,48 @@ class CARES_SAML_Public {
 		$attributes = $idp_provider->getAttributes();
 
 		$get_user_by = self::get_option( 'get_user_by' );
-		$attribute = self::get_option( "user_{$get_user_by}_attribute" );
-		if ( empty( $attributes[ $attribute ][0] ) ) {
-			return new WP_Error( 'wp_saml_auth_missing_attribute', sprintf( esc_html__( '"%s" attribute missing in SimpleSAMLphp response. Please contact your administrator.', 'wp-saml-auth' ), $get_user_by ) );
+		$existing_user = false;
+
+		// If 'idp_user_id' is specified, the comparison is against a meta value.
+		if ( 'idp_user_id' === $get_user_by && isset( $attributes['idp_user_id'][0] ) ) {
+			$meta_matches = get_users( array(
+				'meta_key'     => $idp . '_idp_user_id',
+				'meta_value'   => $attributes['idp_user_id'][0],
+			) );
+
+			if ( $meta_matches ) {
+				$existing_user = current( $meta_matches );
+			} else {
+				// This is temporary, and will be removed once the accounts are synced.
+				$get_user_by = 'email';
+			}
 		}
 
 		/*
-		 * Attempt to log the user into WP using the email address provided by
-		 * the remote Identity Provider.
+		 * Attempt to log the user into WP using the email address or username
+		 * (whichever is specified in cares_wp_saml_auth_option)
+		 * provided by the remote Identity Provider.
 		 */
-		$existing_user = get_user_by( $get_user_by, $attributes[ $attribute ][0] );
+		if ( ! $existing_user && 'idp_user_id' !== $get_user_by ) {
+			$attribute = self::get_option( "user_{$get_user_by}_attribute" );
+			if ( empty( $attributes[ $attribute ][0] ) ) {
+				return new WP_Error( 'wp_saml_auth_missing_attribute', sprintf( esc_html__( '"%s" attribute missing in SimpleSAMLphp response. Please contact your administrator.', 'wp-saml-auth' ), $get_user_by ) );
+			}
+			$existing_user = get_user_by( $get_user_by, $attributes[ $attribute ][0] );
+		}
+
 		if ( $existing_user ) {
+			/**
+			 * Fires after a user is logged in via SAML authentication.
+			 *
+			 * @since 1.3.0
+			 *
+			 * @param WP_User $existing_user The WP_User object for the logged-in user.
+			 * @param string  $idp           The ID of the remote identity provider.
+			 * @param array   $attributes    The user attributes returned by the remote identity provider.
+			 */
+			do_action( 'after_saml_auth_logged_in', $existing_user, $idp, $attributes );
+
 			return $existing_user;
 		}
 
@@ -236,7 +267,7 @@ class CARES_SAML_Public {
 				$query_args,
 				wp_registration_url() ) );
 
-			return new WP_Error( 'wp_saml_auth_auto_provision_disabled', sprintf( __( 'No Community Commons account exists with your email address. Please <a href="%s">register</a> for a new account.', 'wp-saml-auth' ), $registration_url ) );
+			return new WP_Error( 'wp_saml_auth_auto_provision_disabled', sprintf( __( 'No account exists with your email address. Please <a href="%s">register</a> for a new account.', 'wp-saml-auth' ), $registration_url ) );
 		}
 
 		$user_args = array();
@@ -248,22 +279,41 @@ class CARES_SAML_Public {
 		$user_args['user_pass'] = wp_generate_password();
 
 		$user_args = apply_filters( 'wp_saml_auth_insert_user', $user_args );
-		$user_id = wp_insert_user( $user_args );
+
+		// If using the 'idp_user_id' assocation method, only insert the user if we can make the association.
+		if ( 'idp_user_id' === $get_user_by ) {
+			if ( isset( $attributes['idp_user_id'][0] ) ) {
+				$user_id = wp_insert_user( $user_args );
+			} else {
+				return new WP_Error( 'wp_saml_auth_idp_provided_no_id',  __( 'Your identity provider is not returning the necessary data to create an account.', 'wp-saml-auth' ) );
+			}
+		} else {
+			// More common case.
+			$user_id = wp_insert_user( $user_args );
+		}
 
 		// Was the user creation successful?
 		if ( is_wp_error( $user_id ) ) {
 			return $user_id;
 		} else {
 
+			// If using the 'idp_user_id' assocation method, create the usermeta.
+			// if ( 'idp_user_id' === $get_user_by ) {
+			// Using the existence of this attribute, because the get_user_by method may fallback to email if not found.
+			if ( isset( $attributes['idp_user_id'][0] ) ) {
+				update_user_meta( $user_id, $idp . '_idp_user_id', $attributes['idp_user_id'][0] );
+			}
+
 			/**
 			 * Fires after a new user is provisioned via SAML authentication.
 			 *
 			 * @since 1.0.0
 			 *
-			 * @param int    $user_id The ID of the newly created user.
-			 * @param string $idp     The ID of the remote identity provider.
+			 * @param int    $user_id    The ID of the newly created user.
+			 * @param string $idp        The ID of the remote identity provider.
+			 * @param array  $attributes The user attributes returned by the remote identity provider.
 			 */
-			do_action( 'after_saml_auth_provisioned_user', $user_id, $idp );
+			do_action( 'after_saml_auth_provisioned_user', $user_id, $idp, $attributes );
 		}
 
 		return get_user_by( 'id', $user_id );
@@ -415,8 +465,19 @@ class CARES_SAML_Public {
 		 */
 		} else if ( $email_address && $idp = cares_saml_get_idp_by_email_address( $email_address ) ) {
 			$user = $this->do_saml_authentication( $idp );
+		/*
+		 * If we're requiring remote authentication, refer the authorization to an identity provider.
+		 */
+		} else if ( cares_saml_must_use_remote_auth() ) {
+			// Do we know which IDP to use?
+			$idps = cares_saml_get_idps_for_site();
+			if ( 1 === count( $idps ) ) {
+				$user = $this->do_saml_authentication( current( $idps ) );
+			} else {
+				// We can't guess, we'll need more info, but in the meantime we need to prevent the login.
+				return new WP_Error( 'cares_saml_auth_lookup_email_required', __( 'Please provide a valid email address.', 'wp-saml-auth' ) );
+			}
 		}
-
 		/*
 		 * If this came from the "Sign in with SSO" page, and the login
 		 * didn't go through, determine the error state.
