@@ -575,6 +575,7 @@ class CARES_SAML_Public {
 		if ( $auth_source ) {
 			$idp_provider = $this->get_simplesamlphp_auth_instance( $auth_source );
 			$idp_provider->logout( add_query_arg( 'loggedout', true, get_home_url() ) );
+			SimpleSAML_Session::getSessionFromRequest()->cleanup();
 		}
 	}
 
