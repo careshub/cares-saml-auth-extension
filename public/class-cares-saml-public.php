@@ -73,8 +73,9 @@ class CARES_SAML_Public {
 		add_action( 'login_form_sso_forward', array( $this, 'forward_login_to_remote_idp' ) );
 
 		// Log the user out of the remote auth provider when they log out of WordPress.
-		// Not using this at the moment, because it seems weird to logout upstream.
-		// add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
+		// Generally disabled. Enable it by setting `'logout_upstream' => true`
+		// in your `cares_wp_saml_auth_option` filter function.
+		add_action( 'wp_logout', array( $this, 'simplesamlphp_logout' ) );
 
 		add_filter( 'login_redirect', array( $this, 'maybe_redirect_after_saml_auth' ), 999, 3 );
 
@@ -565,11 +566,15 @@ class CARES_SAML_Public {
 	 * @param string $auth_source Which remote identity provider to use.
 	 */
 	public function simplesamlphp_logout( $auth_source = null ) {
+		if ( ! self::get_option( 'logout_upstream' ) ) {
+			return;
+		}
+
 		$auth_source = $this->choose_auth_source( $auth_source );
 
 		if ( $auth_source ) {
 			$idp_provider = $this->get_simplesamlphp_auth_instance( $auth_source );
-			$idp_provider->logout( add_query_arg( 'loggedout', true, wp_login_url() ) );
+			$idp_provider->logout( add_query_arg( 'loggedout', true, get_home_url() ) );
 		}
 	}
 

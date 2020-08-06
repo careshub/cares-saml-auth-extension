@@ -356,6 +356,12 @@ function cares_wpsa_filter_option( $value, $option_name ) {
 		 * @param string
 		 */
 		'default_role'           => get_option( 'default_role' ),
+		/**
+		 * Should the user be logged out upstream when logging out of WordPress?
+		 *
+		 * @param bool
+		 */
+		'logout_upstream'      => false,
 	);
 	$value = isset( $defaults[ $option_name ] ) ? $defaults[ $option_name ] : $value;
 	return $value;
