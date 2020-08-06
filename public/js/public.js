@@ -29,9 +29,9 @@
 	// Registration form changes
 	if ( $( ".buddypress.register" ) ){
 		// At page load, pre-fill the username and email address if possible.
-		var sso_email = getUrlParameter( 'sso_email' ) || $.cookie('sso_email') || '',
-			sso_username = getUrlParameter( 'sso_username' ) || $.cookie('sso_username') || '',
-			sso_displayname = getUrlParameter( 'sso_displayname' ) || $.cookie('sso_displayname') || '';
+		var sso_email = getUrlParameter( 'sso_email' ) || '',
+			sso_username = getUrlParameter( 'sso_username' ) || '',
+			sso_displayname = getUrlParameter( 'sso_displayname' ) || '';
 
 		if ( sso_email.length ) {
 			$( "#signup_email, #signup_email_confirm").val( sso_email ).trigger( "change" );
