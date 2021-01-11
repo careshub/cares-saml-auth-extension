@@ -90,6 +90,8 @@ class CARES_SAML_Public {
 		add_action( 'login_form', array( $this, 'login_form_add_action_input' ) );
 		// Add an SSO link to the bottom of login forms in the CC theme.
 		add_action( 'cares_after_login_form', array( $this, 'login_forms_add_sso_link' ) );
+		// Add an SSO link to the bottom of login forms created by the "cares login forms" plugin.
+		add_action( 'cares_login_widget_form', array( $this, 'login_forms_add_sso_link' ) );
 
 		// Intercept password reset requests for users that authenticate against external identity providers
 		add_action( 'lostpassword_post', array( $this, 'check_lost_password_request' ) );
