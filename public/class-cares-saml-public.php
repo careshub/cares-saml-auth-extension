@@ -627,6 +627,9 @@ class CARES_SAML_Public {
 				esc_url( $sso_login_url ),
 				$class
 			);
+
+			// Add the necessary script.
+			$this->enqueue_login_scripts();
 		}
 	}
 
