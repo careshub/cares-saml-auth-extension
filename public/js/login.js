@@ -10,7 +10,7 @@
 		     return old.replace( "Username or ", "" );
 		});
 		$( "#loginform" ).prepend( '<h3 style="margin-bottom:1em;">Single Sign-On</h3>' );
-		$( "#user_pass" ).attr( "disabled", true ).parents( "p" ).hide();
+		$( "#user_pass" ).attr( "disabled", true ).parents( ".user-pass-wrap" ).hide();
 		$( ".forgetmenot" ).hide();
 		if ( sso_email ) {
 			$( "#user_login" ).val( sso_email );
