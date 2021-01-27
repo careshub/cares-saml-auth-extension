@@ -1,31 +1,6 @@
 (function ( $ ) {
 	"use strict";
 
-	// Add a "Log In Using SSO" toggle to the login forms.
-	$( ".log-in-with-sso" ).on( "click", function(e){
-		e.preventDefault();
-		var switching_to_sso = ! $( ".login-form-password-label" ).hasClass( "using-sso" );
-
-		if ( switching_to_sso ) {
-			// Class change handles transition and marks state.
-			$( ".login-form-password-label" ).addClass( "using-sso" );
-			// Change some labels.
-			$( ".log-in-with-sso" ).text( "Cancel SSO Login" );
-			$( 'form[name="login-form"]' ).find( "input[type=submit]" ).val( "Log In Using SSO" );
-			// Disable/enable the password input.
-			$( "input[name=pwd]" ).attr( "disabled", true ).delay( 500 ).parents( "label" ).hide();
-		} else {
-			// Class change handles transition and marks state.
-			$( ".login-form-password-label" ).removeClass( "using-sso" );
-			// Change some labels.
-			$( ".log-in-with-sso" ).text( "Log In Using SSO" );
-			$( 'form[name="login-form"]' ).find( "input[type=submit]" ).val( "Log In" );
-			// Disable/enable the password input.
-			$( "input[name=pwd]" ).attr( "disabled", false ).delay( 500 ).parents( "label" ).show();
-			// $( 'form[name="login-form"]' ).attr('action', 'hostingURL');
-		}
-	});
-
 	// Registration form changes
 	if ( $( ".buddypress.register" ) ){
 		// At page load, pre-fill the username and email address if possible.

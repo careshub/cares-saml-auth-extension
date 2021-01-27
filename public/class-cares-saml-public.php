@@ -62,7 +62,7 @@ class CARES_SAML_Public {
 		add_action( 'init', array( $this, 'load_plugin_textdomain' ) );
 
 		// Load public-facing style sheet and JavaScript.
-		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_styles_scripts' ) );
+		add_action( 'bp_init', array( $this, 'maybe_enqueue_bp_styles_scripts' ) );
 		add_action( 'login_enqueue_scripts', array( $this, 'enqueue_login_scripts' ) );
 
 		// Before logging in, check if the user is required to log in against a remote identity provider.
@@ -152,15 +152,27 @@ class CARES_SAML_Public {
 	}
 
 	/**
+	 * Register and enqueue BuddyPress-specific assets.
+	 *
+	 * @since    1.0.0
+	 */
+	public function maybe_enqueue_bp_styles_scripts() {
+		// Scripts for Registration
+		if ( bp_is_register_page() ) {
+			add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_bp_reg_scripts' ) );
+		}
+
+	}
+
+	/**
 	 * Register and enqueue public-facing style sheet.
 	 *
 	 * @since    1.0.0
 	 */
-	public function enqueue_styles_scripts() {
+	public function enqueue_bp_reg_scripts() {
 		// Scripts
-		wp_enqueue_script( $this->plugin_slug . '-plugin-script', plugins_url( 'js/public.js', __FILE__ ), array( 'jquery' ), $this->version, true );
+		wp_enqueue_script( $this->plugin_slug . 'bp-registration-plugin-script', plugins_url( 'js/bp-registration-mods.js', __FILE__ ), array( 'jquery' ), $this->version, true );
 	}
-
 
 	/**
 	 * Register and enqueue public-facing style sheet.
