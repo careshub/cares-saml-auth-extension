@@ -17,7 +17,7 @@
  * @return array
  */
 function cares_saml_get_idp_associations() {
-	return array(
+	return apply_filters( 'cares_saml_get_idp_associations', array(
 		'heart.org'    => 'heart.org',
 		'testshib.org' => 'testshib.org',
 		'unl.edu'      => 'unl.edu',
@@ -30,7 +30,7 @@ function cares_saml_get_idp_associations() {
 		'mizzou.edu'   => 'umsystem.edu',
 		'umsl.edu'     => 'umsystem.edu',
 		'*.*'          => 'extension2.missouri.edu',
-	);
+	) );
 }
 
 /**
