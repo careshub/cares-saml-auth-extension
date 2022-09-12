@@ -891,6 +891,19 @@ class CARES_SAML_Public {
 
 				$user = wp_signon( array( 'user_login' => $attributes[ $attribute ][0], 'user_password' => 'placeholder' ) );
 
+				if ( $user instanceof WP_User ) {
+					/**
+					 * Fires after a user is authenticated via SAML authentication.
+					 *
+					 * @since 1.3.0
+					 *
+					 * @param int    $user_id    The ID of the newly authenticated user.
+					 * @param string $idp        The ID of the remote identity provider.
+					 * @param array  $attributes The user attributes returned by the remote identity provider.
+					 */
+					do_action( 'after_saml_auth_user_signon', $user->ID, $idp, $attributes );
+				}
+
 			}
 		}
 
