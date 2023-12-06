@@ -222,6 +222,27 @@ class CARES_SAML_Admin {
 			'cares_sso_section_2' // Section ID
 		);
 
+		// Enable extra logging.
+		add_settings_section(
+			'cares_sso_section_3', // Section ID
+			__( 'Enable extra logging.', 'cares-saml-auth' ), // Title
+			'__return_false', // Callback
+			$this->plugin_slug // Page
+		);
+		register_setting(
+			$this->plugin_slug, // Option group
+			'sso_enable_logging', // Option ID
+			array(
+				'sanitize_callback' => 'absint',
+			)
+		);
+		add_settings_field(
+			'sso_enable_logging', // Option ID
+			__( 'Enable extra logging.', 'cares-saml-auth' ), // Title
+			array( $this, 'render_sso_enable_logging' ), // Render callback
+			$this->plugin_slug, // Page
+			'cares_sso_section_3' // Section ID
+		);
 	}
 
 	/**
@@ -271,6 +292,28 @@ class CARES_SAML_Admin {
 		<fieldset id="sso_required_for_all_logins">
 			<legend class="screen-reader-text"><?php _e( 'Require all logins to be handled by remote identity providers. Do not allow local logins via WordPress.', 'cares-saml-auth' ); ?></legend>
 			<input type="checkbox" name="sso_required_all_logins" value=1 id="sso_required_for_all_logins_checkbox"<?php checked( cares_saml_must_use_remote_auth() ); ?>> <label for="sso_required_for_all_logins_checkbox"> <?php _e( 'Require all logins to be handled by remote identity providers. Do not allow local logins via WordPress.', 'cares-saml-auth' ); ?></label>
+		</fieldset>
+
+		<?php
+	}
+
+	/**
+	 * Render third section form inputs.
+	 *
+	 * @since    1.3.0
+	 */
+	public function render_sso_enable_logging() {
+		?>
+		<fieldset id="sso_enable_logging_inputs">
+			<legend class="screen-reader-text"><?php _e( 'Enable extra logging', 'cares-saml-auth' ); ?></legend>
+			<input type="checkbox" name="sso_enable_logging" value=1 id="sso_enable_logging_checkbox"<?php checked( cares_saml_enable_logging() ); ?>> <label for="sso_enable_logging_checkbox"> <?php _e( 'Log troubleshooting info to <code>wp-uploads/cares-saml-auth-debug.log</code>.', 'cares-saml-auth' ); ?></label>
+			<p class="info">This log file could contain sensitive information, so be sure to protect it by adding the following rule to <code>your-site/wp-content/uploads/.htaccess</code>:<br />
+				<pre>
+&lt;Files &quot;cares-saml-auth-debug.log&quot;&gt;
+	Require all denied
+&lt;/Files&gt;
+				</pre>
+			</p>
 		</fieldset>
 
 		<?php

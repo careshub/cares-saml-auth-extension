@@ -212,6 +212,10 @@ class CARES_SAML_Public {
 		$idp_provider->requireAuth();
 		$attributes = $idp_provider->getAttributes();
 
+		if ( cares_saml_enable_logging() ) {
+			cares_saml_write_log( 'Attributes returned from IdP: ' . print_r( $attributes, true ) );
+		}
+
 		$get_user_by = self::get_option( 'get_user_by' );
 		$existing_user = false;
 

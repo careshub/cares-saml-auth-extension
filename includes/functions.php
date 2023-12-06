@@ -368,3 +368,27 @@ function cares_wpsa_filter_option( $value, $option_name ) {
 	return $value;
 }
 add_filter( 'cares_wp_saml_auth_option', 'cares_wpsa_filter_option', 0, 2 );
+
+/**
+ * Has the site admin checked the "enable extra logging" checkbox?
+ *
+ * @since 1.3.0
+ *
+ * @return bool
+ */
+function cares_saml_enable_logging() {
+	return (bool) get_option( 'sso_enable_logging' );
+}
+
+/**
+ * Log items to our custom log.
+ *
+ * @param string $message
+ */
+function cares_saml_write_log( $message = '' ) {
+	if ( $message ) {
+		$upload_dir = wp_upload_dir( null, false );
+		$log_path   = trailingslashit( $upload_dir['basedir'] ) . 'cares-saml-auth-debug.log';
+		error_log( '[' . gmdate( 'd-M-Y H:i:s' ) . '] ' . $message . PHP_EOL, 3, $log_path );
+	}
+}
