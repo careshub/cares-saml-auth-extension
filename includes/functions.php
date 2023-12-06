@@ -19,7 +19,6 @@
 function cares_saml_get_idp_associations() {
 	return apply_filters( 'cares_saml_get_idp_associations', array(
 		'heart.org'    => 'heart.org',
-		'testshib.org' => 'testshib.org',
 		'unl.edu'      => 'unl.edu',
 		// Associative array is important because several domains could point to same idp, like
 		'umsystem.edu' => 'umsystem.edu',
