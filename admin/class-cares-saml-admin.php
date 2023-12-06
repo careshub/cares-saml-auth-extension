@@ -135,7 +135,6 @@ class CARES_SAML_Admin {
 		// Note that update/get/delete_option sets option for current site.
 		?>
 		<div class="wrap">
-			<?php screen_icon(); ?>
 			<h2><?php echo esc_html( get_admin_page_title() ); ?></h2>
 
 			<form action="<?php echo admin_url( 'options.php' ) ?>" method='post'>
