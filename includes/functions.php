@@ -28,7 +28,6 @@ function cares_saml_get_idp_associations() {
 		'umh.edu'      => 'umsystem.edu',
 		'mizzou.edu'   => 'umsystem.edu',
 		'umsl.edu'     => 'umsystem.edu',
-		'*.*'          => 'extension2.missouri.edu',
 	) );
 }
 
