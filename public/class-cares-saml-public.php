@@ -48,6 +48,22 @@ class CARES_SAML_Public {
 	protected $plugin_slug = 'cares-saml-auth';
 
 	/**
+	 * Class name to instantiate for SimpleSAML Auth.
+	 * Replaced with namespaced version if available.
+	 *
+	 * @var string
+	 */
+	private $simplesamlphp_class = 'SimpleSAML_Auth_Simple';
+
+	/**
+	 * Class name to instantiate for SimpleSAML Sessoin.
+	 * Replaced with namespaced version if available.
+	 *
+	 * @var string
+	 */
+	private $simplesamlphp_session_class = 'SimpleSAML_Session';
+
+	/**
 	 * Initialize the plugin by setting localization and loading public scripts
 	 * and styles.
 	 *
@@ -355,7 +371,11 @@ class CARES_SAML_Public {
 			require_once $simplesamlphp_path;
 		}
 
-		if ( ! class_exists( 'SimpleSAML_Auth_Simple' ) ) {
+		if ( class_exists( 'SimpleSAML\Auth\Simple' ) ) {
+			$this->simplesamlphp_class = 'SimpleSAML\Auth\Simple';
+		}
+
+		if ( ! class_exists( $this->simplesamlphp_class ) ) {
 			add_action( 'admin_notices', function() {
 				if ( current_user_can( 'manage_options' ) ) {
 					echo '<div class="message error"><p>' . wp_kses_post( sprintf( __( "WP SAML Auth wasn't able to find the <code>SimpleSAML_Auth_Simple</code> class. Please check the <code>simplesamlphp_autoload</code> configuration option, or <a href='%s'>visit the plugin page</a> for more information.", 'wp-saml-auth' ), 'https://wordpress.org/plugins/wp-saml-auth/' ) ) . '</p></div>';
@@ -364,7 +384,7 @@ class CARES_SAML_Public {
 			return false;
 		}
 
-		return new SimpleSAML_Auth_Simple( $auth_source );
+		return new $this->simplesamlphp_class( $auth_source );
 	}
 
 	/**
@@ -382,7 +402,11 @@ class CARES_SAML_Public {
 			require_once( $simplesamlphp_path );
 		}
 
-		if ( ! class_exists( 'SimpleSAML_Session' ) ) {
+		if ( class_exists( 'SimpleSAML\Session' ) ) {
+			$this->simplesamlphp_session_class = 'SimpleSAML\Session';
+		}
+
+		if ( ! class_exists( $this->simplesamlphp_session_class ) ) {
 			add_action( 'admin_notices', function() {
 				if ( current_user_can( 'manage_options' ) ) {
 					echo '<div class="message error"><p>' . wp_kses_post( sprintf( __( "WP SAML Auth wasn't able to find the <code>SimpleSAML_Session</code> class. Please check the <code>simplesamlphp_autoload</code> configuration option, or <a href='%s'>visit the plugin page</a> for more information.", 'wp-saml-auth' ), 'https://wordpress.org/plugins/wp-saml-auth/' ) ) . '</p></div>';
@@ -392,7 +416,7 @@ class CARES_SAML_Public {
 		}
 
 		// Get the session details.
-		return SimpleSAML_Session::getSessionFromRequest();
+		return $this->simplesamlphp_session_class::getSessionFromRequest();
 	}
 
 	/**
@@ -593,7 +617,7 @@ class CARES_SAML_Public {
 		if ( $auth_source ) {
 			$idp_provider = $this->get_simplesamlphp_auth_instance( $auth_source );
 			$idp_provider->logout( add_query_arg( 'loggedout', true, get_home_url() ) );
-			SimpleSAML_Session::getSessionFromRequest()->cleanup();
+			$this->simplesamlphp_session_class::getSessionFromRequest()->cleanup();
 		}
 	}
 
@@ -750,7 +774,7 @@ class CARES_SAML_Public {
 			$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
 
 			// Don't continue if simpleSAMLphp isn't set up.
-			if ( ! class_exists( 'SimpleSAML_Auth_Simple' ) || ( ! $idp_provider instanceof SimpleSAML_Auth_Simple ) ) {
+			if ( ! class_exists( $this->simplesamlphp_class ) || ( ! $idp_provider instanceof $this->simplesamlphp_class ) ) {
 				return false;
 			}
 
@@ -800,7 +824,7 @@ class CARES_SAML_Public {
 				$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
 				// If this user isn't authenticated, stop processing and send an error message back.
 				// Otherwise, we'll let the wp_signon() happen.
-				if ( ! $idp_provider instanceof SimpleSAML_Auth_Simple || ! $idp_provider->isAuthenticated() ) {
+				if ( ! $idp_provider instanceof $this->simplesamlphp_class || ! $idp_provider->isAuthenticated() ) {
 					$response = array(
 						'userid' 	 => 0,
 						'message' 	 => 'This user must log in using a remote identity provider.',
@@ -832,7 +856,7 @@ class CARES_SAML_Public {
 		if ( ! is_user_logged_in() && $idp = $this->get_auth_source_from_session() ) {
 			$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
 
-			if ( $idp_provider instanceof SimpleSAML_Auth_Simple && $idp_provider->isAuthenticated() ) {
+			if ( $idp_provider instanceof $this->simplesamlphp_class && $idp_provider->isAuthenticated() ) {
 
 				$attributes = $idp_provider->getAttributes();
 				$get_user_by = self::get_option( 'get_user_by' );
@@ -884,7 +908,7 @@ class CARES_SAML_Public {
 		if ( ! is_user_logged_in() && $idp = $this->get_auth_source_from_session() ) {
 			$idp_provider = $this->get_simplesamlphp_auth_instance( $idp );
 
-			if ( $idp_provider instanceof SimpleSAML_Auth_Simple && $idp_provider->isAuthenticated() ) {
+			if ( $idp_provider instanceof $this->simplesamlphp_class && $idp_provider->isAuthenticated() ) {
 
 				$attributes = $idp_provider->getAttributes();
 				$get_user_by = self::get_option( 'get_user_by' );
